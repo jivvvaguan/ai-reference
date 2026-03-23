@@ -51,10 +51,11 @@ async function queryOne<T = Record<string, unknown>>(sql: string, params?: unkno
   return rows[0] ?? null;
 }
 
-/** Execute DML (INSERT/UPDATE/DELETE) */
+/** Execute DML (INSERT/UPDATE/DELETE) — uses pool.query(), NOT pool.execute() */
 async function execute(sql: string, params?: unknown[]): Promise<{ affectedRows: number }> {
   const formatted = params ? mysql.format(sql, params) : sql;
-  const [result] = await getPool().execute(formatted);
+  // CRITICAL: Must use query(), not execute(). StarRocks doesn't support COM_STMT_PREPARE.
+  const [result] = await getPool().query(formatted);
   return { affectedRows: (result as any).affectedRows ?? 0 };
 }
 
@@ -73,7 +74,56 @@ async function queryWithPlannerTimeout<T = Record<string, unknown>>(
   }
 }
 
+/** Run multiple SELECTs on one connection with extended planner timeout */
+async function queryBatchWithPlannerTimeout<T = Record<string, unknown>>(
+  sqls: { sql: string; params?: unknown[] }[], timeoutMs = 10000
+): Promise<T[][]> {
+  const conn = await getPool().getConnection();
+  try {
+    await conn.query(`SET new_planner_optimize_timeout = ${timeoutMs}`);
+    const results: T[][] = [];
+    for (const { sql, params } of sqls) {
+      const formatted = params ? mysql.format(sql, params) : sql;
+      const [rows] = await conn.query(formatted);
+      results.push(rows as T[]);
+    }
+    return results;
+  } finally {
+    conn.release();
+  }
+}
+
+/** Long-running SELECT with extended query_timeout (default 600s) */
+async function queryLong<T = Record<string, unknown>>(
+  sql: string, params?: unknown[], timeoutSec = 600
+): Promise<T[]> {
+  const conn = await getPool().getConnection();
+  try {
+    await conn.query(`SET query_timeout = ${timeoutSec}`);
+    const formatted = params ? mysql.format(sql, params) : sql;
+    const [rows] = await conn.query(formatted);
+    return rows as T[];
+  } finally {
+    conn.release();
+  }
+}
+
+/** Long-running DML with extended query_timeout (for INSERT...SELECT across large tables) */
+async function executeLong(sql: string, params?: unknown[], timeoutSec = 600): Promise<{ affectedRows: number }> {
+  const conn = await getPool().getConnection();
+  try {
+    await conn.query(`SET query_timeout = ${timeoutSec}`);
+    const formatted = params ? mysql.format(sql, params) : sql;
+    const [result] = await conn.query(formatted);
+    return { affectedRows: (result as any).affectedRows ?? 0 };
+  } finally {
+    conn.release();
+  }
+}
+
 // --- Exclusion helper (must apply to almost every user query) ---
+// NOTE: This is a static SQL fragment (no user input), safe to concatenate.
+// Do NOT put user-supplied values in SQL fragments — always use mysql.format().
 
 const EXCLUDE_CLAUSE = `
   AND account_id NOT IN (SELECT account_id FROM mainnet_lens.market_maker_accounts)
