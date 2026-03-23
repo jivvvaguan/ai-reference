@@ -28,7 +28,7 @@ SODEX 是去中心化永续合约交易所，API 架构分三层：
 - ❌ 签名 v 值直接用 → ethers 返回 27/28，SODEX 需要 0/1（减 27）
 - ❌ 签名后直接发 → 需要 prepend `0x01`（交易操作）或 `0x02`（AddAPIKey）
 - ❌ 永续和现货用同一个 domain.name → 永续用 "futures"，现货用 "spot"
-- ❌ body 发完整 `{type, params}` → 实际 HTTP body 只发 params 部分
+- ❌ body 发完整 `{type, params}` → 签名用 `{type, params}`，但 HTTP body 只发 params 部分
 - ❌ 不处理 replace 失败 → replace 失败后必须回退到 cancel + place
 - ❌ WebSocket 不发 ping → 60 秒无消息自动断开
 
@@ -50,33 +50,38 @@ SODEX 是去中心化永续合约交易所，API 架构分三层：
 ## API 速查
 
 ### 公开行情（无鉴权）
+路径模式: `/markets/{resource}`
 
 | Endpoint | 方法 | 用途 |
 |----------|------|------|
-| `/tickers` | GET | 全部/单个交易对实时价格 |
-| `/tickers?symbol=ETH-USD` | GET | 指定交易对 ticker |
-| `/symbols` | GET | 交易对元数据（tickSize/precision/symbolID） |
-| `/markPrices` | GET | 标记价格 + 资金费率 |
-| `/orderbook?symbol=ETH-USD&limit=10` | GET | 订单簿深度 |
+| `/markets/tickers` | GET | 全部交易对实时价格 |
+| `/markets/tickers?symbol=ETH-USD` | GET | 指定交易对 ticker |
+| `/markets/symbols` | GET | 交易对元数据（tickSize/precision/symbolID） |
+| `/markets/mark-prices` | GET | 标记价格 + 资金费率 |
+| `/markets/{symbol}/orderbook?limit=10` | GET | 订单簿深度 |
 
-### 账户查询（传地址，无签名）
+### 账户查询（地址在路径中，无签名）
+路径模式: `/accounts/{address}/{resource}`
 
 | Endpoint | 方法 | 用途 |
 |----------|------|------|
-| `/openOrders?address=0x...` | GET | 当前挂单 |
-| `/positions?address=0x...` | GET | 当前持仓 |
-| `/accountState?address=0x...` | GET | 账户余额/保证金 |
-| `/orderHistory?address=0x...&limit=50` | GET | 历史订单 |
+| `/accounts/{addr}/orders` | GET | 当前挂单 |
+| `/accounts/{addr}/positions` | GET | 当前持仓 |
+| `/accounts/{addr}/state` | GET | 账户余额/保证金 |
+| `/accounts/{addr}/orders/history` | GET | 历史订单 |
 
 ### 交易操作（EIP-712 签名）
+路径模式: `/trade/{resource}`
 
 | Endpoint | 方法 | 签名 type | 用途 |
 |----------|------|-----------|------|
-| `/order` | POST | newOrder | 下单（支持批量） |
-| `/cancel` | POST | cancelOrder | 撤单（支持批量） |
-| `/replace` | POST | replaceOrder | 改单（原子撤+下） |
-| `/scheduleCancel` | POST | scheduleCancel | 定时全撤（心跳保护） |
-| `/leverage` | POST | updateLeverage | 调整杠杆 |
+| `/trade/orders` | POST | newOrder | 下单（支持批量） |
+| `/trade/orders` | **DELETE** | cancelOrder | 撤单（支持批量） |
+| `/trade/orders/replace` | POST | replaceOrder | 改单（原子撤+下） |
+| `/trade/orders/schedule-cancel` | POST | scheduleCancel | 定时全撤（心跳保护） |
+| `/trade/leverage` | POST | updateLeverage | 调整杠杆 |
+
+**注意:** 撤单用 DELETE 方法，不是 POST。
 
 ### 签名 Headers
 
@@ -109,7 +114,7 @@ X-API-Nonce: {nonce string}
 Side:          BUY=1, SELL=2
 OrderType:     LIMIT=1, MARKET=2
 TimeInForce:   GTC=1, FOK=2, IOC=3, GTX=4(Post-Only)
-OrderModifier: NORMAL=1, STOP=2, BRACKET=3
+OrderModifier: NORMAL=1, STOP=2, BRACKET=3, ATTACHED_STOP=4
 PositionSide:  BOTH=1, LONG=2, SHORT=3
 MarginMode:    ISOLATED=1, CROSS=2
 ```

@@ -14,7 +14,7 @@ import { Wallet, keccak256, toUtf8Bytes } from "ethers";
 const CONFIG = {
   restEndpoint: process.env.SODEX_REST_ENDPOINT || "https://testnet-gw.sodex.dev/api/v1/perps",
   wsEndpoint: process.env.SODEX_WS_ENDPOINT || "wss://testnet-gw.sodex.dev/ws/perps",
-  chainId: parseInt(process.env.SODEX_CHAIN_ID || "138565"), // testnet
+  chainId: parseInt(process.env.SODEX_CHAIN_ID || "138565"), // testnet=138565, mainnet=286623
   privateKey: process.env.SODEX_PRIVATE_KEY || "",
   apiKeyName: process.env.SODEX_API_KEY_NAME || "",
   requestTimeoutMs: 8_000,
@@ -27,7 +27,7 @@ const CONFIG = {
 const Side = { BUY: 1, SELL: 2 } as const;
 const OrderType = { LIMIT: 1, MARKET: 2 } as const;
 const TimeInForce = { GTC: 1, FOK: 2, IOC: 3, GTX: 4 } as const; // GTX = Post-Only
-const OrderModifier = { NORMAL: 1, STOP: 2, BRACKET: 3 } as const;
+const OrderModifier = { NORMAL: 1, STOP: 2, BRACKET: 3, ATTACHED_STOP: 4 } as const;
 const PositionSide = { BOTH: 1, LONG: 2, SHORT: 3 } as const;
 const MarginMode = { ISOLATED: 1, CROSS: 2 } as const;
 
@@ -111,6 +111,12 @@ interface PerpsOrderItem {
   positionSide: number;
 }
 
+interface PerpsCancelItem {
+  symbolID: number;
+  orderID?: number;
+  clOrdID?: string;
+}
+
 // --- Nonce Manager ---
 
 class NonceManager {
@@ -149,9 +155,11 @@ class SodexSigner {
 
   /**
    * Sign an exchange action (newOrder, cancelOrder, replaceOrder, etc.)
+   *
+   * Signing payload = Keccak256(JSON.stringify({ type, params }))
    * Returns signature with 0x01 prefix + nonce
    */
-  async signAction(payload: object): Promise<{ signature: string; nonce: bigint }> {
+  async signAction(payload: { type: string; params: object }): Promise<{ signature: string; nonce: bigint }> {
     const nonce = this.nonceManager.next();
     const payloadHash = keccak256(toUtf8Bytes(JSON.stringify(payload)));
 
@@ -195,58 +203,65 @@ class SodexClient {
   }
 
   // -- Public Market Data (no auth) --
+  // Path pattern: /markets/{resource}
 
   async getTickers(symbol?: string): Promise<ApiResponse<TickerData[]>> {
-    const qs = symbol ? `?symbol=${symbol}` : "";
-    return this.get(`/tickers${qs}`);
+    return this.publicGet("/markets/tickers", symbol ? { symbol } : undefined);
   }
 
   async getSymbols(symbol?: string): Promise<ApiResponse<SymbolData[]>> {
-    const qs = symbol ? `?symbol=${symbol}` : "";
-    return this.get(`/symbols${qs}`);
+    return this.publicGet("/markets/symbols", symbol ? { symbol } : undefined);
   }
 
   async getMarkPrices(symbol?: string): Promise<ApiResponse<any[]>> {
-    const qs = symbol ? `?symbol=${symbol}` : "";
-    return this.get(`/markPrices${qs}`);
+    return this.publicGet("/markets/mark-prices", symbol ? { symbol } : undefined);
   }
 
   async getOrderbook(symbol: string, limit = 10): Promise<ApiResponse<OrderbookData>> {
-    return this.get(`/orderbook?symbol=${symbol}&limit=${limit}`);
+    return this.publicGet(`/markets/${symbol}/orderbook`, { limit: limit.toString() });
   }
 
-  // -- Account Queries (address required, no signature) --
+  // -- Account Queries (address in path, no signature) --
+  // Path pattern: /accounts/{address}/{resource}
 
-  async getOpenOrders(address: string, symbol?: string): Promise<ApiResponse<OrderData[]>> {
-    const qs = symbol ? `&symbol=${symbol}` : "";
-    return this.get(`/openOrders?address=${address}${qs}`);
+  async getOpenOrders(address: string, symbol?: string, accountID?: number): Promise<ApiResponse<OrderData[]>> {
+    const params: Record<string, string> = {};
+    if (symbol) params.symbol = symbol;
+    if (accountID) params.accountID = accountID.toString();
+    return this.publicGet(`/accounts/${address}/orders`, params);
   }
 
-  async getPositions(address: string): Promise<ApiResponse<PositionData[]>> {
-    return this.get(`/positions?address=${address}`);
+  async getPositions(address: string, accountID?: number): Promise<ApiResponse<PositionData[]>> {
+    const params: Record<string, string> = {};
+    if (accountID) params.accountID = accountID.toString();
+    return this.publicGet(`/accounts/${address}/positions`, params);
   }
 
-  async getAccountState(address: string): Promise<ApiResponse<AccountStateData>> {
-    return this.get(`/accountState?address=${address}`);
+  async getAccountState(address: string, accountID?: number): Promise<ApiResponse<AccountStateData>> {
+    const params: Record<string, string> = {};
+    if (accountID) params.accountID = accountID.toString();
+    return this.publicGet(`/accounts/${address}/state`, params);
   }
 
   async getOrderHistory(address: string, symbol?: string, limit = 50): Promise<ApiResponse<OrderData[]>> {
-    const qs = symbol ? `&symbol=${symbol}` : "";
-    return this.get(`/orderHistory?address=${address}&limit=${limit}${qs}`);
+    const params: Record<string, string> = { limit: limit.toString() };
+    if (symbol) params.symbol = symbol;
+    return this.publicGet(`/accounts/${address}/orders/history`, params);
   }
 
   // -- Trading (EIP-712 signed) --
+  // Path pattern: /trade/{resource}
 
   /** Place one or more orders */
   async placeOrders(accountID: number, symbolID: number, orders: PerpsOrderItem[]): Promise<ApiResponse<null>> {
     const params = { accountID, symbolID, orders };
-    return this.signedPost("/order", { type: "newOrder", params });
+    return this.signedRequest("POST", "/trade/orders", "newOrder", params);
   }
 
-  /** Cancel one or more orders */
-  async cancelOrders(accountID: number, cancels: { symbolID: number; orderID?: number; clOrdID?: string }[]): Promise<ApiResponse<null>> {
+  /** Cancel one or more orders (NOTE: uses DELETE method) */
+  async cancelOrders(accountID: number, cancels: PerpsCancelItem[]): Promise<ApiResponse<null>> {
     const params = { accountID, cancels };
-    return this.signedPost("/cancel", { type: "cancelOrder", params });
+    return this.signedRequest("DELETE", "/trade/orders", "cancelOrder", params);
   }
 
   /** Replace orders (atomic cancel + place) */
@@ -259,21 +274,20 @@ class SodexClient {
     quantity?: string;
   }[]): Promise<ApiResponse<null>> {
     const params = { accountID, orders };
-    return this.signedPost("/replace", { type: "replaceOrder", params });
+    return this.signedRequest("POST", "/trade/orders/replace", "replaceOrder", params);
   }
 
   /** Schedule auto-cancel at timestamp (heartbeat protection) */
   async scheduleCancel(accountID: number, scheduledTimestamp?: number): Promise<ApiResponse<null>> {
-    const params = scheduledTimestamp
-      ? { accountID, scheduledTimestamp }
-      : { accountID };
-    return this.signedPost("/scheduleCancel", { type: "scheduleCancel", params });
+    const params: { accountID: number; scheduledTimestamp?: number } = { accountID };
+    if (scheduledTimestamp !== undefined) params.scheduledTimestamp = scheduledTimestamp;
+    return this.signedRequest("POST", "/trade/orders/schedule-cancel", "scheduleCancel", params);
   }
 
   /** Update leverage for a symbol */
   async updateLeverage(accountID: number, symbolID: number, leverage: number, marginMode = MarginMode.CROSS): Promise<ApiResponse<null>> {
     const params = { accountID, symbolID, leverage, marginMode };
-    return this.signedPost("/leverage", { type: "updateLeverage", params });
+    return this.signedRequest("POST", "/trade/leverage", "updateLeverage", params);
   }
 
   // -- Helpers --
@@ -293,19 +307,38 @@ class SodexClient {
     };
   }
 
-  private async get<T>(path: string): Promise<ApiResponse<T>> {
-    const resp = await fetch(`${this.endpoint}${path}`, {
+  private async publicGet<T>(path: string, params?: Record<string, string>): Promise<ApiResponse<T>> {
+    const url = new URL(`${this.endpoint}${path}`);
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        url.searchParams.set(k, v);
+      }
+    }
+    const resp = await fetch(url.toString(), {
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(CONFIG.requestTimeoutMs),
     });
     return resp.json() as Promise<ApiResponse<T>>;
   }
 
-  private async signedPost<T>(path: string, payload: { type: string; params: object }): Promise<ApiResponse<T>> {
-    const { signature, nonce } = await this.signer.signAction(payload);
+  /**
+   * Signed request for trading operations.
+   *
+   * CRITICAL: Signing payload is { type, params } but HTTP body is params only.
+   */
+  private async signedRequest<T>(
+    method: string,
+    path: string,
+    actionType: string,
+    params: object,
+  ): Promise<ApiResponse<T>> {
+    // Sign the FULL payload { type, params }
+    const signingPayload = { type: actionType, params };
+    const { signature, nonce } = await this.signer.signAction(signingPayload);
 
+    // Send only params as body (not the full {type, params})
     const resp = await fetch(`${this.endpoint}${path}`, {
-      method: "POST",
+      method,
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -313,7 +346,7 @@ class SodexClient {
         "X-API-Sign": signature,
         "X-API-Nonce": nonce.toString(),
       },
-      body: JSON.stringify(payload.params), // Note: only params, not full payload
+      body: JSON.stringify(params),
       signal: AbortSignal.timeout(CONFIG.requestTimeoutMs),
     });
     return resp.json() as Promise<ApiResponse<T>>;
@@ -331,36 +364,18 @@ interface WsBookData {
 }
 
 interface WsTradeData {
-  E: number;                   // event time
-  s: string;                   // symbol
-  i: number;                   // order ID
-  c: string;                   // client order ID
-  S: string;                   // side "BUY" | "SELL"
-  p: string;                   // price
-  q: string;                   // quantity
-  f: string;                   // fee
-  m: boolean;                  // is maker
+  E: number; s: string; i: number; c: string;
+  S: string; p: string; q: string; f: string; m: boolean;
 }
 
 interface WsOrderUpdate {
-  E: number;                   // event time
-  s: string;                   // symbol
-  i: number;                   // order ID
-  c: string;                   // client order ID
-  S: string;                   // side
-  o: string;                   // order type
-  p: string;                   // price
-  q: string;                   // quantity
-  X: string;                   // status: NEW | PARTIALLY_FILLED | FILLED | CANCELED
-  x: string;                   // execution type: NEW | TRADE | CANCELED | REPLACED
+  E: number; s: string; i: number; c: string;
+  S: string; o: string; p: string; q: string;
+  X: string; x: string; // X=status, x=execution type
 }
 
 interface WsMarkPrice {
-  s: string;                   // symbol
-  p: string;                   // mark price
-  i: string;                   // index price
-  r: string;                   // funding rate
-  T: number;                   // next funding time
+  s: string; p: string; i: string; r: string; T: number;
 }
 
 type WsHandler = {
@@ -383,13 +398,8 @@ class SodexWebSocket {
   private pongTimeout: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
 
-  constructor(
-    endpoint: string,
-    masterAddress: string,
-    symbols: string[],
-    tickSizes: Record<string, string>,
-    handlers: WsHandler,
-  ) {
+  constructor(endpoint: string, masterAddress: string, symbols: string[],
+    tickSizes: Record<string, string>, handlers: WsHandler) {
     this.endpoint = endpoint;
     this.masterAddress = masterAddress;
     this.symbols = symbols;
@@ -399,103 +409,70 @@ class SodexWebSocket {
 
   connect(): void {
     this.ws = new WebSocket(this.endpoint);
-
     this.ws.onopen = () => {
       this.reconnectAttempt = 0;
       this.subscribe();
       this.startPing();
       this.handlers.connected?.();
     };
-
     this.ws.onmessage = (event) => {
       const msg = JSON.parse(String(event.data));
-      if (msg.op === "pong") {
-        if (this.pongTimeout) clearTimeout(this.pongTimeout);
-        return;
-      }
+      if (msg.op === "pong") { if (this.pongTimeout) clearTimeout(this.pongTimeout); return; }
       this.dispatch(msg);
     };
-
-    this.ws.onclose = () => {
-      this.stopPing();
-      this.handlers.disconnected?.();
-      this.scheduleReconnect();
-    };
-
-    this.ws.onerror = () => {
-      this.ws?.close();
-    };
+    this.ws.onclose = () => { this.stopPing(); this.handlers.disconnected?.(); this.scheduleReconnect(); };
+    this.ws.onerror = () => { this.ws?.close(); };
   }
 
   close(): void {
-    this.reconnectAttempt = -1; // Prevent reconnect
+    this.reconnectAttempt = -1;
     this.stopPing();
     this.ws?.close();
   }
 
   private subscribe(): void {
-    // L2 orderbook per symbol
     for (const symbol of this.symbols) {
       this.send({ op: "subscribe", params: { channel: "l2Book", symbol, tickSize: this.tickSizes[symbol] || "0.1" } });
     }
-    // Mark prices
     this.send({ op: "subscribe", params: { channel: "markPrice", symbols: this.symbols } });
-    // Account channels
     this.send({ op: "subscribe", params: { channel: "accountTrade", user: this.masterAddress, symbols: this.symbols } });
     this.send({ op: "subscribe", params: { channel: "accountOrderUpdate", user: this.masterAddress, symbols: this.symbols } });
     this.send({ op: "subscribe", params: { channel: "accountUpdate", user: this.masterAddress } });
   }
 
-  private dispatch(msg: any): void {
-    const channel = msg.channel as string;
-    const data = msg.data;
+  private dispatch(msg: { channel?: string; data?: any }): void {
+    const { channel, data } = msg;
     if (!channel || !data) return;
-
     switch (channel) {
-      case "l2Book":
-        this.handlers.l2Book?.(data);
-        break;
-      case "accountTrade":
-        this.handlers.accountTrade?.(Array.isArray(data) ? data : [data]);
-        break;
-      case "accountOrderUpdate":
-        this.handlers.accountOrderUpdate?.(Array.isArray(data) ? data : [data]);
-        break;
-      case "markPrice":
-        this.handlers.markPrice?.(Array.isArray(data) ? data : [data]);
-        break;
+      case "l2Book": this.handlers.l2Book?.(data); break;
+      case "accountTrade": this.handlers.accountTrade?.(Array.isArray(data) ? data : [data]); break;
+      case "accountOrderUpdate": this.handlers.accountOrderUpdate?.(Array.isArray(data) ? data : [data]); break;
+      case "markPrice": this.handlers.markPrice?.(Array.isArray(data) ? data : [data]); break;
     }
   }
 
   private startPing(): void {
     this.pingTimer = setInterval(() => {
       this.send({ op: "ping" });
-      this.pongTimeout = setTimeout(() => {
-        console.warn("[ws] Pong timeout, reconnecting...");
-        this.ws?.close();
-      }, 10_000);
+      this.pongTimeout = setTimeout(() => { this.ws?.close(); }, 10_000);
     }, 30_000);
   }
 
   private stopPing(): void {
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.pongTimeout) clearTimeout(this.pongTimeout);
-    this.pingTimer = null;
-    this.pongTimeout = null;
+    this.pingTimer = null; this.pongTimeout = null;
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectAttempt < 0) return; // close() was called
+    if (this.reconnectAttempt < 0) return;
     this.reconnectAttempt++;
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt - 1), 30_000);
-    console.log(`[ws] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`);
     setTimeout(() => this.connect(), delay);
   }
 
   private send(msg: object): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
-    }
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 }
 
@@ -504,32 +481,29 @@ class SodexWebSocket {
 async function example_marketData(client: SodexClient) {
   console.log("\n--- Market Data ---");
 
-  // Tickers
   const tickers = await client.getTickers("ETH-USD");
-  if (tickers.code === 0 && tickers.data) {
+  if (tickers.code === 0 && tickers.data?.[0]) {
     const t = tickers.data[0];
-    console.log(`ETH-USD: last=${t.lastPrice} bid=${t.bestBidPrice} ask=${t.bestAskPrice} vol=${t.volume24h}`);
+    console.log(`ETH-USD: last=${t.lastPrice} bid=${t.bestBidPrice} ask=${t.bestAskPrice}`);
+  } else {
+    console.log(`getTickers: code=${tickers.code} error=${tickers.error}`);
   }
 
-  // Symbol metadata (needed for price/qty formatting)
   const symbols = await client.getSymbols("ETH-USD");
-  if (symbols.code === 0 && symbols.data) {
+  if (symbols.code === 0 && symbols.data?.[0]) {
     const s = symbols.data[0];
-    console.log(`ETH-USD: symbolID=${s.symbolID} tickSize=${s.tickSize} pricePrecision=${s.pricePrecision}`);
+    console.log(`Symbol: id=${s.symbolID} tick=${s.tickSize} step=${s.stepSize} pricePrecision=${s.pricePrecision}`);
   }
 
-  // Orderbook
   const ob = await client.getOrderbook("ETH-USD", 5);
   if (ob.code === 0 && ob.data) {
-    console.log(`Orderbook: ${ob.data.bids.length} bids, ${ob.data.asks.length} asks`);
-    console.log(`  Best bid: ${ob.data.bids[0]?.[0]} @ ${ob.data.bids[0]?.[1]}`);
-    console.log(`  Best ask: ${ob.data.asks[0]?.[0]} @ ${ob.data.asks[0]?.[1]}`);
+    console.log(`Orderbook: best bid=${ob.data.bids[0]?.[0]} best ask=${ob.data.asks[0]?.[0]}`);
   }
 
-  // Mark prices + funding
   const marks = await client.getMarkPrices("ETH-USD");
   if (marks.code === 0 && marks.data?.[0]) {
-    console.log(`Mark: ${marks.data[0].markPrice} Funding: ${marks.data[0].fundingRate}`);
+    const m = marks.data[0];
+    console.log(`Mark: price=${m.markPrice} index=${m.indexPrice} funding=${m.fundingRate}`);
   }
 }
 
@@ -546,13 +520,14 @@ async function example_accountQueries(client: SodexClient, address: string) {
     for (const p of positions.data) {
       console.log(`Position ${p.symbol}: size=${p.size} entry=${p.entryPrice} pnl=${p.unrealizedPnl}`);
     }
+    if (positions.data.length === 0) console.log("No open positions");
   }
 
   const orders = await client.getOpenOrders(address);
   if (orders.code === 0 && orders.data) {
     console.log(`Open orders: ${orders.data.length}`);
     for (const o of orders.data.slice(0, 3)) {
-      console.log(`  #${o.orderID} ${o.side === 1 ? "BUY" : "SELL"} ${o.price} x ${o.quantity} [${o.status}]`);
+      console.log(`  #${o.orderID} ${o.side === 1 ? "BUY" : "SELL"} ${o.price} x ${o.quantity}`);
     }
   }
 }
@@ -563,137 +538,93 @@ async function example_tradingFlow(client: SodexClient, address: string) {
   // 1. Get account ID and symbol ID
   const stateResp = await client.getAccountState(address);
   if (stateResp.code !== 0 || !stateResp.data) {
-    console.error("Failed to get account state:", stateResp.error);
-    return;
+    console.error("Failed to get account state:", stateResp.error); return;
   }
   const accountID = stateResp.data.accountID;
 
   const symbolsResp = await client.getSymbols("ETH-USD");
   if (symbolsResp.code !== 0 || !symbolsResp.data?.[0]) {
-    console.error("Failed to get symbol info:", symbolsResp.error);
-    return;
+    console.error("Failed to get symbol info:", symbolsResp.error); return;
   }
   const symbolID = symbolsResp.data[0].symbolID;
 
-  // 2. Place a limit buy order (post-only)
+  // 2. Place a limit buy order (post-only, far from market to avoid fill)
   const clOrdID = `EXAMPLE-BUY-${Date.now()}`;
-  const order = SodexClient.makeOrder(clOrdID, Side.BUY, "2000.0", "0.01");
+  const order = SodexClient.makeOrder(clOrdID, Side.BUY, "1000.0", "0.01");
 
-  console.log(`Placing order: ${clOrdID} BUY 0.01 ETH @ 2000.0`);
+  console.log(`Placing order: BUY 0.01 ETH @ 1000.0 (clOrdID=${clOrdID})`);
   const placeRes = await client.placeOrders(accountID, symbolID, [order]);
-  if (placeRes.code !== 0) {
-    console.error("Place failed:", placeRes.error);
-    return;
-  }
-  console.log("Order placed successfully");
+  if (placeRes.code !== 0) { console.error("Place failed:", placeRes.error); return; }
+  console.log("Order placed");
 
   // 3. Replace the order (change price)
   const newClOrdID = `EXAMPLE-BUY-${Date.now()}`;
-  console.log(`Replacing order: ${clOrdID} → ${newClOrdID} @ 1999.0`);
+  console.log(`Replacing: ${clOrdID} → ${newClOrdID} @ 999.0`);
   const replaceRes = await client.replaceOrders(accountID, [{
-    symbolID,
-    clOrdID: newClOrdID,
-    origClOrdID: clOrdID,
-    price: "1999.0",
-    quantity: "0.01",
+    symbolID, clOrdID: newClOrdID, origClOrdID: clOrdID, price: "999.0", quantity: "0.01",
   }]);
   if (replaceRes.code !== 0) {
-    console.error("Replace failed, falling back to cancel + place:", replaceRes.error);
-    // Fallback: cancel original, then place new
+    // Replace failed — fallback to cancel + place
+    console.warn("Replace failed, falling back to cancel + place:", replaceRes.error);
     await client.cancelOrders(accountID, [{ symbolID, clOrdID }]);
     await client.placeOrders(accountID, symbolID, [
-      SodexClient.makeOrder(newClOrdID, Side.BUY, "1999.0", "0.01"),
+      SodexClient.makeOrder(newClOrdID, Side.BUY, "999.0", "0.01"),
     ]);
   }
 
   // 4. Cancel the order
-  console.log(`Canceling order: ${newClOrdID}`);
   const cancelRes = await client.cancelOrders(accountID, [{ symbolID, clOrdID: newClOrdID }]);
-  console.log(`Cancel result: code=${cancelRes.code}`);
+  console.log(`Cancel: code=${cancelRes.code}`);
 
-  // 5. Schedule cancel heartbeat (auto-cancel in 5 min if client dies)
-  const expiryMs = Date.now() + 5 * 60 * 1000;
-  console.log(`Setting schedule cancel: ${new Date(expiryMs).toISOString()}`);
-  await client.scheduleCancel(accountID, expiryMs);
+  // 5. Schedule cancel heartbeat (auto-cancel in 5 min)
+  await client.scheduleCancel(accountID, Date.now() + 5 * 60_000);
+  console.log("Schedule cancel set (5 min)");
 
   // 6. Clear schedule cancel
   await client.scheduleCancel(accountID);
   console.log("Schedule cancel cleared");
 }
 
-async function example_websocket() {
-  console.log("\n--- WebSocket ---");
+async function example_websocket(signer: SodexSigner) {
+  console.log("\n--- WebSocket (10s) ---");
 
-  if (!CONFIG.privateKey) {
-    console.log("Skipping WebSocket example (no SODEX_PRIVATE_KEY)");
-    return;
-  }
-
-  const signer = new SodexSigner(CONFIG.privateKey, CONFIG.chainId);
-
-  const ws = new SodexWebSocket(
-    CONFIG.wsEndpoint,
-    signer.address,
-    ["ETH-USD"],
-    { "ETH-USD": "0.1" },
-    {
-      connected: () => console.log("[ws] Connected, subscriptions sent"),
+  const ws = new SodexWebSocket(CONFIG.wsEndpoint, signer.address, ["ETH-USD"],
+    { "ETH-USD": "0.1" }, {
+      connected: () => console.log("[ws] Connected"),
       disconnected: () => console.log("[ws] Disconnected"),
-      l2Book: (data) => {
-        console.log(`[ws] L2Book ${data.s}: ${data.b.length} bids, ${data.a.length} asks`);
-        console.log(`  Best bid: ${data.b[0]?.[0]} Best ask: ${data.a[0]?.[0]}`);
-      },
-      accountTrade: (trades) => {
-        for (const t of trades) {
-          console.log(`[ws] Trade: ${t.S} ${t.q} ${t.s} @ ${t.p} (maker=${t.m})`);
-        }
-      },
-      accountOrderUpdate: (updates) => {
-        for (const u of updates) {
-          console.log(`[ws] Order #${u.i}: ${u.X} (${u.x}) ${u.S} ${u.q} @ ${u.p}`);
-        }
-      },
-      markPrice: (prices) => {
-        for (const p of prices) {
-          console.log(`[ws] Mark ${p.s}: ${parseFloat(p.p).toFixed(2)} funding=${p.r}`);
-        }
-      },
-    },
-  );
+      l2Book: (d) => console.log(`[ws] Book ${d.s}: ${d.b.length} bids, ${d.a.length} asks, best=${d.b[0]?.[0]}/${d.a[0]?.[0]}`),
+      accountTrade: (ts) => ts.forEach(t => console.log(`[ws] Fill: ${t.S} ${t.q} ${t.s} @ ${t.p}`)),
+      accountOrderUpdate: (us) => us.forEach(u => console.log(`[ws] Order #${u.i}: ${u.X} ${u.S} ${u.q} @ ${u.p}`)),
+      markPrice: (ps) => ps.forEach(p => console.log(`[ws] Mark ${p.s}: ${parseFloat(p.p).toFixed(2)}`)),
+    });
 
   ws.connect();
-
-  // Run for 10 seconds then close
   await new Promise(r => setTimeout(r, 10_000));
   ws.close();
-  console.log("[ws] Closed");
 }
 
 // ═══ 4. Main (直接运行验证) ═══
 
 async function main() {
-  console.log("=== SODEX API Integration Example ===");
+  console.log("=== SODEX API Example ===");
   console.log(`Endpoint: ${CONFIG.restEndpoint}`);
-  console.log(`Chain ID: ${CONFIG.chainId}`);
 
   if (!CONFIG.privateKey) {
-    console.log("\nNo SODEX_PRIVATE_KEY set — running market data examples only (no signing)\n");
-
-    // Market data works without auth
-    const dummySigner = { address: "0x0000000000000000000000000000000000000000" } as SodexSigner;
-    const client = new SodexClient(CONFIG.restEndpoint, dummySigner, "");
+    console.log("No SODEX_PRIVATE_KEY — market data only\n");
+    // Market data works without auth, use dummy signer
+    const client = new SodexClient(CONFIG.restEndpoint, {} as SodexSigner, "");
     await example_marketData(client);
     return;
   }
 
   const signer = new SodexSigner(CONFIG.privateKey, CONFIG.chainId);
   const client = new SodexClient(CONFIG.restEndpoint, signer, CONFIG.apiKeyName);
-  console.log(`Address: ${signer.address}`);
+  console.log(`Address: ${signer.address}\n`);
 
   await example_marketData(client);
   await example_accountQueries(client, signer.address);
   await example_tradingFlow(client, signer.address);
-  await example_websocket();
+  await example_websocket(signer);
 
   console.log("\n=== Done ===");
 }
