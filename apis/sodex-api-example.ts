@@ -101,14 +101,18 @@ interface AccountStateData {
 
 interface PerpsOrderItem {
   clOrdID: string;
-  modifier: number;
-  side: number;
-  type: number;
-  timeInForce: number;
-  price?: string;
-  quantity?: string;
+  modifier: number;      // OrderModifier enum
+  side: number;           // Side enum
+  type: number;           // OrderType enum
+  timeInForce: number;    // TimeInForce enum
+  price?: string;         // DecimalString, required for LIMIT
+  quantity?: string;      // DecimalString, required if not using funds
+  funds?: string;         // Alternative to quantity (market orders)
+  stopPrice?: string;     // For STOP/BRACKET orders
+  stopType?: number;      // Stop trigger type
+  triggerType?: number;   // Trigger price source
   reduceOnly: boolean;
-  positionSide: number;
+  positionSide: number;   // PositionSide enum
 }
 
 interface PerpsCancelItem {
@@ -354,6 +358,8 @@ class SodexClient {
 }
 
 // --- WebSocket Client ---
+// NOTE: Uses Bun's built-in WebSocket (browser-compatible API: onopen/onmessage/onclose).
+// For Node.js, use `import WebSocket from "ws"` with `ws.on("open", ...)` event style instead.
 
 interface WsBookData {
   s: string;                   // symbol
