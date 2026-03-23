@@ -354,6 +354,9 @@ async function main() {
     await example_retention(from, to);
     await example_funnel(from, to);
     await example_pointsSummary();
+
+    // User lookup demo (uncomment with a real address to test cross-db JOIN)
+    // await example_userLookup("0x..your_wallet_address..");
   } catch (err: any) {
     console.error("Query failed:", err.message);
   } finally {
