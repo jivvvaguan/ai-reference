@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SoDEX — Add API Key</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; background: #0b0e11; color: #d1d4dc; display: flex; justify-content: center; padding: 40px 16px; }
+.container { max-width: 520px; width: 100%; }
+h1 { font-size: 20px; color: #ccc; margin-bottom: 24px; }
+.card { background: #131722; border: 1px solid #1e2332; border-radius: 6px; padding: 20px; margin-bottom: 16px; }
+.card h2 { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 14px; }
+label { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; margin-top: 12px; }
+label:first-child { margin-top: 0; }
+input, select { width: 100%; background: #0b0e11; border: 1px solid #1e2332; color: #d1d4dc; padding: 8px 10px; border-radius: 4px; font-family: inherit; font-size: 13px; }
+input:focus, select:focus { border-color: #f0b90b; outline: none; }
+.hint { font-size: 11px; color: #555; margin-top: 2px; }
+button { padding: 10px 20px; border-radius: 4px; font-family: inherit; font-size: 13px; cursor: pointer; border: none; margin-top: 8px; margin-right: 8px; }
+.btn-primary { background: rgba(14,203,129,.2); color: #0ecb81; border: 1px solid #0ecb81; }
+.btn-primary:hover { background: rgba(14,203,129,.3); }
+.btn-primary:disabled { background: #131722; color: #555; cursor: not-allowed; border-color: #1e2332; }
+.btn-secondary { background: #0b0e11; color: #6b7280; border: 1px solid #1e2332; }
+.btn-secondary:hover { background: #1c2030; }
+.btn-wallet { padding: 12px 20px; border-radius: 6px; font-family: inherit; font-size: 14px; cursor: pointer; border: 1px solid #1e2332; background: #0b0e11; color: #d1d4dc; width: 100%; display: flex; align-items: center; gap: 10px; margin-bottom: 8px; transition: all .15s; }
+.btn-wallet:hover { background: #1c2030; border-color: #f0b90b; }
+.btn-wallet img { width: 28px; height: 28px; border-radius: 6px; }
+.status { margin-top: 16px; padding: 12px; border-radius: 4px; font-size: 12px; word-break: break-all; display: none; }
+.status.success { display: block; background: rgba(14,203,129,.1); color: #0ecb81; border: 1px solid rgba(14,203,129,.3); }
+.status.error { display: block; background: rgba(246,70,93,.1); color: #f6465d; border: 1px solid rgba(246,70,93,.3); }
+.status.info { display: block; background: rgba(41,98,255,.1); color: #5b8def; border: 1px solid rgba(41,98,255,.3); }
+.wallet-info { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #0b0e11; border-radius: 4px; }
+.wallet-info .addr { font-size: 13px; color: #0ecb81; }
+.wallet-info .disconnect { font-size: 11px; color: #6b7280; cursor: pointer; text-decoration: underline; }
+.step { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.step-num { background: #1e2332; color: #6b7280; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; }
+.step-num.done { background: rgba(14,203,129,.2); color: #0ecb81; }
+.step-text { font-size: 13px; color: #aaa; }
+.generated-key { background: #0b0e11; border: 1px solid #1e2332; border-radius: 4px; padding: 10px; margin-top: 8px; font-size: 11px; word-break: break-all; }
+.generated-key .lbl { color: #6b7280; }
+.generated-key .val { color: #0ecb81; }
+.row { display: flex; gap: 12px; }
+.row > * { flex: 1; }
+.qr-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.qr-modal-content { background: #131722; border: 1px solid #1e2332; border-radius: 12px; padding: 24px; text-align: center; max-width: 360px; }
+.qr-modal-content h3 { margin-bottom: 16px; font-size: 16px; }
+.qr-modal-content canvas { border-radius: 8px; }
+.qr-modal-content .close { margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>SoDEX — Add API Key</h1>
+
+  <!-- Step 1: Connect Wallet -->
+  <div class="card">
+    <h2>Step 1: Connect Wallet</h2>
+    <div id="wallet-section">
+      <button class="btn-wallet" onclick="connectMetaMask()">
+        <img src="https://upload.wikimedia.org/wikipedia/commons/3/36/MetaMask_Fox.svg" alt="MetaMask">
+        <div><div style="font-weight:600">MetaMask</div><div style="font-size:11px;color:#6b7280">Browser Extension</div></div>
+      </button>
+      <button class="btn-wallet" onclick="connectWalletConnect()">
+        <img src="https://avatars.githubusercontent.com/u/37784886?s=200" alt="WalletConnect" style="background:#3b99fc;padding:4px">
+        <div><div style="font-weight:600">WalletConnect</div><div style="font-size:11px;color:#6b7280">Scan QR Code</div></div>
+      </button>
+    </div>
+    <div id="wallet-connected" style="display:none">
+      <div class="wallet-info">
+        <span class="addr" id="walletAddr"></span>
+        <button style="background:#ef4444;color:white;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:13px" onclick="disconnectWallet()">Disconnect</button>
+      </div>
+      <div style="margin-top:8px;font-size:12px;color:#6b7280">
+        AccountID: <span id="accountId" style="color:#d1d4dc">Loading...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR Modal -->
+  <div class="qr-modal" id="qr-modal" style="display:none">
+    <div class="qr-modal-content">
+      <h3>Scan with Mobile Wallet</h3>
+      <div id="qr-display"></div>
+      <div style="margin-top:12px;font-size:12px;color:#6b7280">Open your wallet app and scan</div>
+      <button class="btn-secondary close" onclick="closeQrModal()">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Step 2: Configure -->
+  <div class="card">
+    <h2>Step 2: Configure API Key</h2>
+
+    <label>API Key Name</label>
+    <input type="text" id="keyName" value="mm-bot-key-01" placeholder="^[0-9a-zA-Z_-]{1,36}$">
+    <div class="hint">Unique name, cannot be "default"</div>
+
+    <label>API Key Address (Public Key)</label>
+    <div class="row">
+      <input type="text" id="keyAddress" placeholder="0x... or leave empty to generate">
+      <button class="btn-secondary" onclick="generateKey()" style="flex:none;width:100px;margin-top:0">Generate</button>
+    </div>
+    <div class="hint">Leave empty and click Generate to create a new keypair</div>
+
+    <div id="generated-section" style="display:none;margin-top:8px">
+      <div class="generated-key">
+        <div><span class="lbl">Address: </span><span class="val" id="genAddress"></span></div>
+        <div><span class="lbl">Private Key: </span><span class="val" id="genPrivateKey"></span></div>
+        <div style="color:#f0b90b;font-size:11px;margin-top:4px">Save your private key! Cannot be recovered after closing.</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label>Expiration</label>
+        <select id="expiry">
+          <option value="360" selected>360 Days</option>
+          <option value="180">180 Days</option>
+          <option value="90">90 Days</option>
+          <option value="30">30 Days</option>
+          <option value="7">7 Days</option>
+          <option value="0">Never Expires</option>
+          <option value="custom">Custom Days</option>
+        </select>
+      </div>
+      <div>
+        <label>Custom Days</label>
+        <input type="number" id="customDays" value="360" disabled>
+      </div>
+    </div>
+
+    <label>Network</label>
+    <select id="network">
+      <option value="mainnet" selected>Mainnet (chainId: 286623)</option>
+      <option value="testnet">Testnet (chainId: 138565)</option>
+    </select>
+
+    <label>Destination</label>
+    <select id="destination">
+      <option value="perps" selected>Perps</option>
+      <option value="spot">Spot</option>
+      <option value="both">Both (Perps + Spot)</option>
+    </select>
+  </div>
+
+  <!-- Step 3: Sign & Submit -->
+  <div class="card">
+    <h2>Step 3: Sign & Submit</h2>
+    <div class="step">
+      <div class="step-num" id="step-sign">1</div>
+      <div class="step-text">EIP-712 Signature (wallet will prompt)</div>
+    </div>
+    <div class="step">
+      <div class="step-num" id="step-submit">2</div>
+      <div class="step-text">Submit to SoDEX API</div>
+    </div>
+    <button class="btn-primary" id="submitBtn" onclick="addApiKey()" disabled>Sign & Add API Key</button>
+    <div id="status" class="status"></div>
+  </div>
+
+  <!-- Result -->
+  <div class="card" id="result-card" style="display:none">
+    <h2>Result</h2>
+    <div id="result-content"></div>
+  </div>
+</div>
+
+<!-- Node.js polyfill for WalletConnect -->
+<script>if(typeof process==='undefined')window.process={env:{},version:'',browser:true};</script>
+<!-- No external QR lib needed - using canvas API directly -->
+<!-- ethers v6 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<!-- WalletConnect EthereumProvider (UMD bundle) -->
+<script src="https://unpkg.com/@walletconnect/ethereum-provider@2.17.0/dist/index.umd.js"
+        onerror="console.warn('WC UMD failed, trying ESM...')"
+        onload="window.__WCReady=true"></script>
+
+<script>
+let provider = null;
+let signer = null;
+let walletAddress = null;
+let accountID = null;
+let wcProvider = null;
+
+// WalletConnect project ID — get one free at https://cloud.reown.com
+const WC_PROJECT_ID = 'f65d2dd9feafef13e4dcbf7f8268b19b';
+
+const ENDPOINTS = {
+  mainnet: { perps: 'https://mainnet-gw.sodex.dev/api/v1/perps', spot: 'https://mainnet-gw.sodex.dev/api/v1/spot', chainId: 286623 },
+  testnet: { perps: 'https://testnet-gw.sodex.dev/api/v1/perps', spot: 'https://testnet-gw.sodex.dev/api/v1/spot', chainId: 138565 },
+};
+
+document.getElementById('expiry').addEventListener('change', function() {
+  document.getElementById('customDays').disabled = this.value !== 'custom';
+});
+
+// ── MetaMask Connect ──
+async function connectMetaMask() {
+  if (!window.ethereum) { showStatus('error', 'MetaMask not found. Please install the MetaMask browser extension.'); return; }
+  try {
+    provider = new ethers.BrowserProvider(window.ethereum);
+    signer = await provider.getSigner();
+    walletAddress = await signer.getAddress();
+    onConnected();
+  } catch (e) {
+    showStatus('error', 'MetaMask connect failed: ' + e.message);
+  }
+}
+
+// ── WalletConnect ──
+async function connectWalletConnect() {
+  showStatus('info', 'Loading WalletConnect...');
+
+  // Find the EthereumProvider - try multiple locations
+  let EthereumProvider = null;
+
+  // UMD global
+  if (window.EthereumProvider) {
+    EthereumProvider = window.EthereumProvider;
+  } else if (window.WalletConnectEthereumProvider) {
+    EthereumProvider = window.WalletConnectEthereumProvider;
+  }
+
+  // Try dynamic import as fallback
+  if (!EthereumProvider) {
+    try {
+      showStatus('info', 'Loading WalletConnect module...');
+      const mod = await import('https://esm.sh/@walletconnect/ethereum-provider@2.17.0');
+      EthereumProvider = mod.EthereumProvider || mod.default;
+    } catch (e) {
+      console.error('WC ESM import failed:', e);
+    }
+  }
+
+  if (!EthereumProvider) {
+    showStatus('error', 'WalletConnect failed to load. Please use MetaMask, or check browser console for errors.');
+    return;
+  }
+
+  try {
+    showStatus('info', 'Initializing WalletConnect session...');
+    wcProvider = await EthereumProvider.init({
+      projectId: WC_PROJECT_ID,
+      chains: [286623],
+      optionalChains: [138565],
+      showQrModal: false,
+      rpcMap: {
+        286623: window.location.origin + '/api/rpc',
+        138565: window.location.origin + '/api/rpc',
+      },
+      methods: ['eth_sendTransaction', 'personal_sign', 'eth_sign', 'eth_signTypedData', 'eth_signTypedData_v4'],
+      metadata: {
+        name: 'SoDEX MM Bot',
+        description: 'API Key Manager',
+        url: window.location.origin,
+        icons: [],
+      },
+    });
+
+    wcProvider.on('display_uri', (uri) => {
+      console.log('WC URI:', uri);
+      showQrModal(uri);
+    });
+
+    await wcProvider.connect();
+    closeQrModal();
+
+    // Force switch to ValueChain after connecting
+    var net = document.getElementById('network').value;
+    var targetChainId = net === 'mainnet' ? 286623 : 138565;
+    var targetHex = '0x' + targetChainId.toString(16);
+    if (wcProvider.chainId !== targetChainId) {
+      showStatus('info', 'Switching wallet to ValueChain...');
+      try {
+        await wcProvider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: targetHex }] });
+      } catch (switchErr) {
+        // Chain not in wallet, add it first
+        try {
+          await wcProvider.request({ method: 'wallet_addEthereumChain', params: [{
+            chainId: targetHex, chainName: 'ValueChain', nativeCurrency: { name: 'SOSO', symbol: 'SOSO', decimals: 18 },
+            rpcUrls: ['https://mainnet-rpc.valuechain.xyz'], blockExplorerUrls: ['https://explorer.valuechain.xyz'],
+          }] });
+        } catch (addErr) {
+          showStatus('error', 'Please switch to ValueChain in your wallet manually, then reconnect.');
+          return;
+        }
+      }
+      // Wait for chain switch to propagate
+      await new Promise(r => setTimeout(r, 1000));
+    }
+
+    provider = new ethers.BrowserProvider(wcProvider, targetChainId);
+    signer = await provider.getSigner();
+    walletAddress = await signer.getAddress();
+    onConnected();
+  } catch (e) {
+    closeQrModal();
+    if (e && e.message && e.message.includes('rejected')) {
+      showStatus('info', 'Connection cancelled.');
+    } else {
+      showStatus('error', 'WalletConnect error: ' + (e && e.message || e));
+      console.error('WC error:', e);
+    }
+  }
+}
+
+function showQrModal(uri) {
+  document.getElementById('qr-modal').style.display = 'flex';
+  var el = document.getElementById('qr-display');
+  // Use Google Charts QR API (zero dependency, always works)
+  var qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=280x280&bgcolor=131722&color=d1d4dc&data=' + encodeURIComponent(uri);
+  el.innerHTML = '<img src="' + qrUrl + '" width="280" height="280" style="border-radius:8px;background:#131722" alt="QR Code">' +
+    '<div style="margin-top:8px"><a href="' + uri + '" style="font-size:11px;color:#6b7280;word-break:break-all">' + uri.slice(0, 40) + '...</a></div>';
+}
+
+function closeQrModal() {
+  document.getElementById('qr-modal').style.display = 'none';
+}
+
+async function onConnected() {
+  document.getElementById('wallet-section').style.display = 'none';
+  document.getElementById('wallet-connected').style.display = 'block';
+  document.getElementById('walletAddr').textContent = walletAddress.slice(0, 6) + '...' + walletAddress.slice(-4);
+  document.getElementById('submitBtn').disabled = false;
+  showStatus('info', '');
+  document.getElementById('status').style.display = 'none';
+
+  const net = document.getElementById('network').value;
+  const ep = ENDPOINTS[net];
+  try {
+    const res = await fetch(ep.perps + '/accounts/' + walletAddress + '/state');
+    const data = await res.json();
+    accountID = data.data && data.data.aid;
+    document.getElementById('accountId').textContent = accountID || 'Not found (activate account first)';
+  } catch (e) {
+    document.getElementById('accountId').textContent = 'Error fetching';
+  }
+}
+
+function disconnectWallet() {
+  if (wcProvider) { try { wcProvider.disconnect(); } catch {} wcProvider = null; }
+  provider = null; signer = null; walletAddress = null; accountID = null;
+  // Clear WC session cache
+  try { Object.keys(localStorage).filter(k => k.startsWith('wc@')).forEach(k => localStorage.removeItem(k)); } catch {}
+  document.getElementById('wallet-section').style.display = 'block';
+  document.getElementById('wallet-connected').style.display = 'none';
+  document.getElementById('submitBtn').disabled = true;
+}
+
+function generateKey() {
+  const wallet = ethers.Wallet.createRandom();
+  document.getElementById('keyAddress').value = wallet.address;
+  document.getElementById('genAddress').textContent = wallet.address;
+  document.getElementById('genPrivateKey').textContent = wallet.privateKey;
+  document.getElementById('generated-section').style.display = 'block';
+}
+
+function getExpiresAt() {
+  const sel = document.getElementById('expiry').value;
+  if (sel === '0') return 0;
+  const days = sel === 'custom' ? parseInt(document.getElementById('customDays').value) || 360 : parseInt(sel);
+  return Date.now() + days * 24 * 60 * 60 * 1000;
+}
+
+async function addApiKey() {
+  if (!signer || !walletAddress) { showStatus('error', 'Connect wallet first'); return; }
+  if (!accountID) { showStatus('error', 'AccountID not found. Activate your account first.'); return; }
+
+  const keyName = document.getElementById('keyName').value.trim();
+  if (!keyName || !/^[0-9a-zA-Z_-]{1,36}$/.test(keyName)) { showStatus('error', 'Invalid key name'); return; }
+  if (keyName === 'default') { showStatus('error', '"default" is reserved'); return; }
+
+  const keyAddress = document.getElementById('keyAddress').value.trim();
+  if (!keyAddress || !ethers.isAddress(keyAddress)) { showStatus('error', 'Invalid API key address'); return; }
+
+  const net = document.getElementById('network').value;
+  const ep = ENDPOINTS[net];
+  const dest = document.getElementById('destination').value;
+  const expiresAt = getExpiresAt();
+  const nonce = Date.now();
+
+  showStatus('info', 'Requesting wallet signature...');
+  document.getElementById('submitBtn').disabled = true;
+
+  try {
+    const domain = {
+      name: 'universal', version: '1', chainId: ep.chainId,
+      verifyingContract: '0x0000000000000000000000000000000000000000',
+    };
+    const types = {
+      AddAPIKey: [
+        { name: 'accountID', type: 'uint64' }, { name: 'name', type: 'string' },
+        { name: 'keyType', type: 'uint8' }, { name: 'publicKey', type: 'bytes' },
+        { name: 'expiresAt', type: 'uint64' }, { name: 'nonce', type: 'uint64' },
+      ],
+    };
+    const message = { accountID: accountID, name: keyName, keyType: 1, publicKey: keyAddress, expiresAt: expiresAt, nonce: nonce };
+
+    // Use raw provider to bypass ethers.js chain validation
+    const rawProvider = wcProvider || window.ethereum;
+    const signerAddr = await signer.getAddress();
+    const typedData = JSON.stringify({
+      types: { EIP712Domain: [{ name: 'name', type: 'string' }, { name: 'version', type: 'string' }, { name: 'chainId', type: 'uint256' }, { name: 'verifyingContract', type: 'address' }], ...types },
+      primaryType: 'AddAPIKey', domain, message,
+    });
+    const sig = await rawProvider.request({ method: 'eth_signTypedData_v4', params: [signerAddr, typedData] });
+    const vByte = parseInt(sig.slice(-2), 16);
+    const sigV01 = sig.slice(0, -2) + (vByte >= 27 ? (vByte - 27) : vByte).toString(16).padStart(2, '0');
+    const typedSig = '0x02' + sigV01.slice(2);
+
+    document.getElementById('step-sign').classList.add('done');
+    document.getElementById('step-sign').textContent = '✓';
+    showStatus('info', 'Signed. Submitting...');
+
+    const body = { accountID: accountID, name: keyName, type: 1, publicKey: keyAddress, expiresAt: expiresAt };
+    const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-API-Sign': typedSig, 'X-API-Nonce': nonce.toString(), 'X-API-Chain': ep.chainId.toString() };
+
+    const targets = dest === 'both' ? ['perps', 'spot'] : [dest];
+    const results = [];
+    for (const target of targets) {
+      const res = await fetch(ep[target] + '/accounts/api-keys', { method: 'POST', headers, body: JSON.stringify(body) });
+      const json = await res.json();
+      results.push({ target, code: json.code, error: json.error });
+    }
+
+    document.getElementById('step-submit').classList.add('done');
+    document.getElementById('step-submit').textContent = '✓';
+
+    const allOk = results.every(r => r.code === 0);
+    if (allOk) {
+      showStatus('success', 'API Key added successfully!');
+      let html = '<div class="generated-key">';
+      html += '<div><span class="lbl">Name: </span><span class="val">' + keyName + '</span></div>';
+      html += '<div><span class="lbl">Address: </span><span class="val">' + keyAddress + '</span></div>';
+      html += '<div><span class="lbl">Destination: </span><span class="val">' + targets.join(', ') + '</span></div>';
+      html += '<div><span class="lbl">Expires: </span><span class="val">' + (expiresAt === 0 ? 'Never' : new Date(expiresAt).toLocaleDateString()) + '</span></div>';
+      html += '</div>';
+      document.getElementById('result-content').innerHTML = html;
+      document.getElementById('result-card').style.display = 'block';
+    } else {
+      showStatus('error', 'Failed: ' + results.map(r => r.target + ': ' + (r.code === 0 ? 'OK' : r.error)).join(' | '));
+    }
+  } catch (e) {
+    showStatus('error', 'Error: ' + e.message);
+  }
+  document.getElementById('submitBtn').disabled = false;
+}
+
+function showStatus(type, msg) {
+  const el = document.getElementById('status');
+  el.className = 'status ' + type;
+  el.textContent = msg;
+}
+</script>
+</body>
+</html>
