@@ -7,7 +7,7 @@
 ---
 
 ## APIs
-<!-- - `apis/sodex-api-example.ts` + `.md` — SODEX 交易所 API: 鉴权、行情、K线、WebSocket -->
+- `apis/sodex-api-example.ts` + `sodex-api.md` — SODEX 永续合约 API: EIP-712 签名、行情/交易 REST、WebSocket 实时数据
 <!-- - `apis/coingecko-example.ts` + `.md` — CoinGecko 价格 API: 免费 tier 用法 -->
 
 ## Web3
