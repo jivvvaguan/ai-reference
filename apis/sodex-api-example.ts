@@ -42,23 +42,32 @@ interface ApiResponse<T> {
 
 interface TickerData {
   symbol: string;
-  symbolID: number;
-  lastPrice: string;
+  lastPx: string;           // last traded price
+  bidPx: string;             // best bid
+  askPx: string;             // best ask
+  bidSz: string;             // best bid size
+  askSz: string;             // best ask size
+  volume: string;            // base volume 24h
+  quoteVolume: string;       // quote volume 24h
+  changePct: number;         // 24h change percent
   markPrice: string;
-  bestBidPrice: string;
-  bestAskPrice: string;
-  volume24h: string;
-  priceChangePercent: string;
+  indexPrice: string;
+  fundingRate: string;
+  openInterest: string;
 }
 
 interface SymbolData {
-  symbol: string;
-  symbolID: number;
+  id: number;                // symbol ID (use this for trading)
+  name: string;              // e.g. "ETH-USD"
+  displayName: string;
+  baseCoin: string;
+  quoteCoin: string;
   tickSize: string;
   stepSize: string;
   pricePrecision: number;
   quantityPrecision: number;
   minNotional: string;
+  maxLeverage: number;
 }
 
 interface OrderbookData {
@@ -490,15 +499,16 @@ async function example_marketData(client: SodexClient) {
   const tickers = await client.getTickers("ETH-USD");
   if (tickers.code === 0 && tickers.data?.[0]) {
     const t = tickers.data[0];
-    console.log(`ETH-USD: last=${t.lastPrice} bid=${t.bestBidPrice} ask=${t.bestAskPrice}`);
+    console.log(`ETH-USD: last=${t.lastPx} bid=${t.bidPx} ask=${t.askPx} vol=${t.volume} funding=${t.fundingRate}`);
   } else {
     console.log(`getTickers: code=${tickers.code} error=${tickers.error}`);
   }
 
+  // Symbol metadata — needed for symbolID, tickSize, precision
   const symbols = await client.getSymbols("ETH-USD");
   if (symbols.code === 0 && symbols.data?.[0]) {
     const s = symbols.data[0];
-    console.log(`Symbol: id=${s.symbolID} tick=${s.tickSize} step=${s.stepSize} pricePrecision=${s.pricePrecision}`);
+    console.log(`Symbol: id=${s.id} tick=${s.tickSize} step=${s.stepSize} pricePrecision=${s.pricePrecision} maxLeverage=${s.maxLeverage}`);
   }
 
   const ob = await client.getOrderbook("ETH-USD", 5);
@@ -506,10 +516,10 @@ async function example_marketData(client: SodexClient) {
     console.log(`Orderbook: best bid=${ob.data.bids[0]?.[0]} best ask=${ob.data.asks[0]?.[0]}`);
   }
 
-  const marks = await client.getMarkPrices("ETH-USD");
+  const marks = await client.getMarkPrices("ETH-USD") as ApiResponse<{ symbol: string; markPrice: string; indexPrice: string; fundingRate: string }[]>;
   if (marks.code === 0 && marks.data?.[0]) {
     const m = marks.data[0];
-    console.log(`Mark: price=${m.markPrice} index=${m.indexPrice} funding=${m.fundingRate}`);
+    console.log(`Mark: ${m.markPrice} Index: ${m.indexPrice} Funding: ${m.fundingRate}`);
   }
 }
 
@@ -552,7 +562,7 @@ async function example_tradingFlow(client: SodexClient, address: string) {
   if (symbolsResp.code !== 0 || !symbolsResp.data?.[0]) {
     console.error("Failed to get symbol info:", symbolsResp.error); return;
   }
-  const symbolID = symbolsResp.data[0].symbolID;
+  const symbolID = symbolsResp.data[0].id;
 
   // 2. Place a limit buy order (post-only, far from market to avoid fill)
   const clOrdID = `EXAMPLE-BUY-${Date.now()}`;
