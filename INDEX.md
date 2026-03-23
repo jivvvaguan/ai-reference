@@ -9,6 +9,7 @@
 ## APIs
 - `apis/sodex-api-example.ts` + `sodex-api.md` — SODEX 永续合约 API: EIP-712 签名、行情/交易 REST、WebSocket 实时数据
 - `apis/sodex-api-key-example.ts` + `sodex-api-key.md` + `sodex-api-key-ui.html` — SODEX API Key 注册与使用: 生成密钥对→注册→验证→配置，含前端 UI
+- `apis/sodex-db-example.ts` + `sodex-db.md` — SODEX Analytics 数据库(StarRocks): 连接配置、Schema 拓扑、交易/留存/积分查询、8 条常见坑
 <!-- - `apis/coingecko-example.ts` + `.md` — CoinGecko 价格 API: 免费 tier 用法 -->
 
 ## Web3
