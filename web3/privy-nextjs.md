@@ -52,7 +52,7 @@ lib/
 
 ```typescript
 {
-  appId: "cmgn8067h000ll50co5cu7pen",  // 从 console.privy.io 获取
+  appId: "your-privy-app-id",  // 从 console.privy.io 获取
   config: {
     loginMethods: ['email', 'google', 'apple', 'wallet'],
     appearance: { theme: 'light', accentColor: '#171717' },
@@ -96,7 +96,7 @@ function createSignAdapter(privySign) {
 ## 环境变量
 
 ```bash
-NEXT_PUBLIC_PRIVY_APP_ID=cmgn8067h000ll50co5cu7pen  # 从 console.privy.io
+NEXT_PUBLIC_PRIVY_APP_ID=your-privy-app-id  # 从 console.privy.io
 # 服务端验证（可选）:
 # PRIVY_APP_SECRET=...
 ```
