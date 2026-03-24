@@ -13,6 +13,7 @@
 <!-- - `apis/coingecko-example.ts` + `.md` — CoinGecko 价格 API: 免费 tier 用法 -->
 
 ## Web3
+- `web3/privy-nextjs-example.tsx` + `privy-nextjs.md` — Privy + Next.js: Provider 配置 / 自定义登录(Email OTP+Google+Apple+Wallet) / Auth Hook / signTypedData 适配器 / Onboarding 流程
 <!-- - `web3/walletconnect-example.tsx` + `.md` — WalletConnect v2: React 组件连接钱包 -->
 <!-- - `web3/wagmi-example.tsx` + `.md` — wagmi hooks: useAccount/useConnect/useContractRead -->
 <!-- - `web3/ethers-v6-example.ts` + `.md` — ethers.js v6: Provider/Signer/Contract 模式 -->
